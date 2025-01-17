@@ -338,12 +338,9 @@ class RecurrentRGCN(nn.Module):
             all_masks=torch.cat([mask,inverse_mask],dim=0)
             all_masks=all_masks.to(self.gpu)
             evolve_embs, _, r_emb1, _, _ = self.forward(test_graph, static_graph, use_cuda)
-            #evolve_embs1, _, r_emb1_nhis, _, _ = self.forward(test_graph, static_graph, use_cuda)
-            
+            evolve_embs1, _, r_emb1_nhis, _, _ = self.forward(test_graph, static_graph, use_cuda)
             embedding1 = F.normalize(evolve_embs[-1]) if self.layer_norm else evolve_embs[-1] 
-            #embedding1_nhis = F.normalize(evolve_embs1[-1]) if self.layer_norm else evolve_embs1[-1] 
-            embedding1_nhis=embedding1
-            r_emb1_nhis=r_emb1
+            embedding1_nhis = F.normalize(evolve_embs1[-1]) if self.layer_norm else evolve_embs1[-1] 
             #修改22222：拼接embedding
             #embedding=torch.cat((embedding, test_llm_embeddings), dim=1)
             llm_entity_emb=self.entity_decoder(self.llm_entity_emb)
@@ -352,9 +349,9 @@ class RecurrentRGCN(nn.Module):
             embedding = F.normalize(llm_entity_emb)
             tensor_t = torch.full((llm_relation_emb.size(0), 1), t).to(self.gpu)
             r_emb = F.normalize(llm_relation_emb)
-            e1_embedded_all = F.tanh(embedding1)
+            e1_embedded_all = F.tanh(embedding)
             e1_embedded = e1_embedded_all[all_triples[:, 0]]
-            rel_embedded = r_emb1[all_triples[:, 1]]
+            rel_embedded = r_emb[all_triples[:, 1]]
             stacked_inputs = torch.cat((e1_embedded, rel_embedded), dim=1)
             score_weight = F.sigmoid(torch.mm(stacked_inputs, self.decoder_gate_weight) + self.decoder_gate_bias)
 
@@ -364,9 +361,9 @@ class RecurrentRGCN(nn.Module):
             embedding_nhis = F.normalize(llm_entity_emb_nhis)
             tensor_t = torch.full((llm_relation_emb_nhis.size(0), 1), t).to(self.gpu)
             r_emb_nhis = F.normalize(llm_relation_emb_nhis)
-            e1_embedded_all = F.tanh(embedding1_nhis)
+            e1_embedded_all = F.tanh(embedding_nhis)
             e1_embedded_nhis = e1_embedded_all[all_triples[:, 0]]
-            rel_embedded_nhis = r_emb1_nhis[all_triples[:, 1]]
+            rel_embedded_nhis = r_emb_nhis[all_triples[:, 1]]
             stacked_inputs_nhis = torch.cat((e1_embedded_nhis, rel_embedded_nhis), dim=1)
             score_weight_nhis = F.sigmoid(torch.mm(stacked_inputs_nhis, self.decoder_gate_weight_nhis) + self.decoder_gate_bias_nhis)
 
@@ -404,7 +401,7 @@ class RecurrentRGCN(nn.Module):
                 print(score_weight)
                 print(score_weight_nhis)
                 print(score_weight_all)
-            return all_triples, score, score_rel
+            return all_triples, score, score_rel,score_weight_all
 
 
     def get_loss(self, glist, triples,mask, static_graph, t,use_cuda):
@@ -439,7 +436,6 @@ class RecurrentRGCN(nn.Module):
         #print(all_triples.shape)
         evolve_embs, static_emb, r_emb1, _, _ = self.forward(glist, static_graph, use_cuda)
         evolve_embs_nhis, static_emb, r_emb1_nhis, _, _ = self.forward(glist, static_graph, use_cuda)
-        r_emb1_nhis=r_emb1
         #print(len(evolve_embs))
         llm_entity_emb=self.entity_decoder(self.llm_entity_emb)
         llm_relation_emb=self.relation_decoder(self.llm_relation_emb)
@@ -447,17 +443,17 @@ class RecurrentRGCN(nn.Module):
         llm_relation_emb_nhis=self.relation_decoder_nhis(self.llm_relation_emb)
         
         pre_emb1 = F.normalize(evolve_embs[-1]) if self.layer_norm else evolve_embs[-1]
-        #pre_emb1_nhis = F.normalize(evolve_embs_nhis[-1]) if self.layer_norm else evolve_embs_nhis[-1]
-        pre_emb1_nhis=pre_emb1
+        pre_emb1_nhis = F.normalize(evolve_embs_nhis[-1]) if self.layer_norm else evolve_embs_nhis[-1]
+        
         tensor_t = torch.full((llm_entity_emb.size(0), 1), t).to(self.gpu)
         pre_emb = F.normalize(torch.cat((llm_entity_emb, tensor_t), dim=1))
         pre_emb = F.normalize(llm_entity_emb)
         #r_emb=llm_relation_emb
         tensor_t = torch.full((llm_relation_emb.size(0), 1), t).to(self.gpu)
         r_emb = F.normalize(llm_relation_emb)
-        e1_embedded_all = F.tanh(pre_emb1)
+        e1_embedded_all = F.tanh(pre_emb)
         e1_embedded = e1_embedded_all[all_triples[:, 0]]
-        rel_embedded = r_emb1[all_triples[:, 1]]
+        rel_embedded = r_emb[all_triples[:, 1]]
         stacked_inputs = torch.cat((e1_embedded, rel_embedded), dim=1)
         #print(stacked_inputs.shape)
         #print(self.decoder_gate_weight.shape)
@@ -469,9 +465,9 @@ class RecurrentRGCN(nn.Module):
         tensor_t = torch.full((llm_relation_emb_nhis.size(0), 1), t).to(self.gpu)
         r_emb_nhis = F.normalize(llm_relation_emb_nhis)
         
-        e1_embedded_all = F.tanh(pre_emb1_nhis)
+        e1_embedded_all = F.tanh(pre_emb_nhis)
         e1_embedded = e1_embedded_all[all_triples[:, 0]]
-        rel_embedded = r_emb1_nhis[all_triples[:, 1]]
+        rel_embedded = r_emb[all_triples[:, 1]]
         stacked_inputs_nhis = torch.cat((e1_embedded, rel_embedded), dim=1)
         #print(stacked_inputs.shape)
         #print(self.decoder_gate_weight.shape)
@@ -485,9 +481,9 @@ class RecurrentRGCN(nn.Module):
             #scores_ob=torch.where(all_masks.unsqueeze(1) == 1, scores_ob_his, scores_ob_nhis)
             #scores_ob=mask * scores_ob_his + (1 - mask) * scores_ob_nhis
             #print('okk')
-            score_emb=score_weight_all*scores_ob_his_emb+(1-score_weight_all)*scores_ob_nhis_emb
-            candidate_emb=F.tanh(pre_emb1)
-            candidate_emb_nhis=F.tanh(pre_emb1)
+            score_emb=(score_weight_all)*scores_ob_his_emb+(1-score_weight_all)*scores_ob_nhis_emb
+            candidate_emb=F.tanh(pregra_emb1)
+            candidate_emb_nhis=F.tanh(pre_emb1_nhis)
             #scores_ob=((torch.mm(score_emb, candidate_emb.transpose(1, 0))+torch.mm(score_emb, candidate_emb_nhis.transpose(1, 0)))/2).view(-1, self.num_ents)
             scores_ob=torch.mm(score_emb, candidate_emb.transpose(1, 0)).view(-1, self.num_ents)
             scores_ob_his=torch.mm(scores_ob_his_emb, candidate_emb.transpose(1, 0)).view(-1, self.num_ents)
