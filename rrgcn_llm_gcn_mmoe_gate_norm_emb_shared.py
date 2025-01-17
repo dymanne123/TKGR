@@ -401,7 +401,7 @@ class RecurrentRGCN(nn.Module):
                 print(score_weight)
                 print(score_weight_nhis)
                 print(score_weight_all)
-            return all_triples, score, score_rel,score_weight_all
+            return all_triples, score, score_rel,score_weight_all,score_weight_all[mask==1],score_weight_all[mask==0]
 
 
     def get_loss(self, glist, triples,mask, static_graph, t,use_cuda):
@@ -482,15 +482,20 @@ class RecurrentRGCN(nn.Module):
             #scores_ob=mask * scores_ob_his + (1 - mask) * scores_ob_nhis
             #print('okk')
             score_emb=(score_weight_all)*scores_ob_his_emb+(1-score_weight_all)*scores_ob_nhis_emb
-            candidate_emb=F.tanh(pregra_emb1)
+            score_emb_graph=self.decoder_ob1.forward(pre_emb1, r_emb1, all_triples)
+            score_emb_llm=self.decoder_ob.forward(pre_emb, r_emb, all_triples)
+            candidate_emb=F.tanh(pre_emb1)
+            candidate_emb_llm=F.tanh(pre_emb)
             candidate_emb_nhis=F.tanh(pre_emb1_nhis)
             #scores_ob=((torch.mm(score_emb, candidate_emb.transpose(1, 0))+torch.mm(score_emb, candidate_emb_nhis.transpose(1, 0)))/2).view(-1, self.num_ents)
             scores_ob=torch.mm(score_emb, candidate_emb.transpose(1, 0)).view(-1, self.num_ents)
+            scores_ob_graph=torch.mm(score_emb_graph,candidate_emb.transpose(1, 0)).view(-1, self.num_ents)
+            scores_ob_llm=torch.mm(score_emb_llm,candidate_emb_llm.transpose(1, 0)).view(-1, self.num_ents)
             scores_ob_his=torch.mm(scores_ob_his_emb, candidate_emb.transpose(1, 0)).view(-1, self.num_ents)
             #candidate_emb_nhis=F.tanh(pre_emb1_nhis)
             scores_ob_nhis=torch.mm(scores_ob_nhis_emb, candidate_emb_nhis.transpose(1, 0)).view(-1, self.num_ents)
             scores_ob_side=torch.where(all_masks.unsqueeze(1) == 1, scores_ob_his, scores_ob_nhis)
-            loss_ent += self.loss_e(scores_ob, all_triples[:, 2])+self.loss_e(scores_ob_side, all_triples[:, 2])
+            loss_ent += self.loss_e(scores_ob, all_triples[:, 2])+self.loss_e(scores_ob_side, all_triples[:, 2])+self.loss_e(scores_ob_llm, all_triples[:, 2])
      
         if self.relation_prediction:
             score_rel = self.rdecoder.forward(pre_emb, r_emb, all_triples, mode="train").view(-1, 2 * self.num_rels)
