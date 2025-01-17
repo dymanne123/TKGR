@@ -199,11 +199,6 @@ class RecurrentRGCN(nn.Module):
         self.decoder_gate_bias_all = nn.Parameter(torch.Tensor(1))
         nn.init.zeros_(self.decoder_gate_bias_all)
 
-        self.decoder_gate_weight_graph = nn.Parameter(torch.Tensor(2*100, 1))    
-        nn.init.xavier_uniform_(self.decoder_gate_weight_graph, gain=nn.init.calculate_gain('relu'))
-        self.decoder_gate_bias_graph = nn.Parameter(torch.Tensor(1))
-        nn.init.zeros_(self.decoder_gate_bias_graph)
-
         # GRU cell for relation evolving
         self.relation_cell_1 = nn.GRUCell(self.h_dim*2, self.h_dim)
         self.relation_cell_11= nn.GRUCell(self.h_dim*2, self.h_dim)
@@ -373,7 +368,6 @@ class RecurrentRGCN(nn.Module):
             score_weight_nhis = F.sigmoid(torch.mm(stacked_inputs_nhis, self.decoder_gate_weight_nhis) + self.decoder_gate_bias_nhis)
 
             score_weight_all = F.sigmoid(torch.mm(stacked_inputs, self.decoder_gate_weight_all) + self.decoder_gate_bias_all)
-            score_weight_graph=F.sigmoid(torch.mm(stacked_inputs, self.decoder_gate_weight_graph) + self.decoder_gate_bias_graph)
             #embedding=torch.add(embedding, llm_entity_emb)
             #r_emb=torch.add(r_emb, llm_relation_emb)
             #score = self.decoder_ob.forward(embedding, r_emb, all_triples, mode="test")
@@ -383,12 +377,13 @@ class RecurrentRGCN(nn.Module):
             #core=torch.where(mask.unsqueeze(1) == 1, scores_ob_his, scores_ob_nhis)
             score_his_emb= score_weight*self.decoder_ob.forward(embedding, r_emb, all_triples, mode="test")+(1-score_weight)*self.decoder_ob1.forward(embedding1, r_emb1, all_triples, mode="test")
             score_nhis_emb = score_weight_nhis*self.decoder_ob_nhis.forward(embedding, r_emb, all_triples, mode="test")+(1-score_weight_nhis)*self.decoder_ob1_nhis.forward(embedding1, r_emb1, all_triples, mode="test")
-            
-            score_emb=score_weight_graph*self.decoder_ob1.forward(embedding1, r_emb1, all_triples, mode="test")+(1-score_weight_graph)*(score_weight_all*score_his_emb+(1-score_weight_all)*score_nhis_emb)
-            candidate_emb=F.tanh(embedding1)
+            score_llm_emb= self.decoder_ob.forward(embedding, r_emb, all_triples, mode="test")
+            score_emb=(score_weight_all)*score_his_emb+(1-score_weight_all)*score_nhis_emb
+            candidate_emb=F.tanh(embedding)
             candidate_emb_nhis=F.tanh(embedding1_nhis)
             #score=(torch.mm(score_emb, candidate_emb.transpose(1, 0))+torch.mm(score_emb, candidate_emb_nhis.transpose(1, 0)))/2
-            score=torch.mm(score_emb, candidate_emb.transpose(1, 0))
+            #score=torch.mm(score_emb, candidate_emb.transpose(1, 0))
+            score=torch.mm(score_llm_emb, candidate_emb.transpose(1, 0))
             #print(score_weight_all)
             score_rel = self.rdecoder.forward(embedding, r_emb, all_triples, mode="test")
             #print(mask)
@@ -479,7 +474,6 @@ class RecurrentRGCN(nn.Module):
         #print(self.decoder_gate_weight.shape)
         score_weight_nhis = F.sigmoid(torch.mm(stacked_inputs_nhis, self.decoder_gate_weight_nhis) + self.decoder_gate_bias_nhis)
         score_weight_all = F.sigmoid(torch.mm(stacked_inputs, self.decoder_gate_weight_all) + self.decoder_gate_bias_all)
-        score_weight_graph = F.sigmoid(torch.mm(stacked_inputs, self.decoder_gate_weight_graph) + self.decoder_gate_bias_graph)
         if self.entity_prediction:
             scores_ob_his_emb = (score_weight*self.decoder_ob.forward(pre_emb, r_emb, all_triples))+((1-score_weight)*self.decoder_ob1.forward(pre_emb1, r_emb1, all_triples))
            
@@ -488,8 +482,8 @@ class RecurrentRGCN(nn.Module):
             #scores_ob=torch.where(all_masks.unsqueeze(1) == 1, scores_ob_his, scores_ob_nhis)
             #scores_ob=mask * scores_ob_his + (1 - mask) * scores_ob_nhis
             #print('okk')
+            score_emb=(score_weight_all)*scores_ob_his_emb+(1-score_weight_all)*scores_ob_nhis_emb
             score_emb_graph=self.decoder_ob1.forward(pre_emb1, r_emb1, all_triples)
-            score_emb=score_weight_graph*score_emb_graph+(1-score_weight_graph)*(score_weight_all*scores_ob_his_emb+(1-score_weight_all)*scores_ob_nhis_emb)
             score_emb_llm=self.decoder_ob.forward(pre_emb, r_emb, all_triples)
             candidate_emb=F.tanh(pre_emb1)
             candidate_emb_llm=F.tanh(pre_emb)
@@ -502,7 +496,8 @@ class RecurrentRGCN(nn.Module):
             #candidate_emb_nhis=F.tanh(pre_emb1_nhis)
             scores_ob_nhis=torch.mm(scores_ob_nhis_emb, candidate_emb_nhis.transpose(1, 0)).view(-1, self.num_ents)
             scores_ob_side=torch.where(all_masks.unsqueeze(1) == 1, scores_ob_his, scores_ob_nhis)
-            loss_ent += self.loss_e(scores_ob, all_triples[:, 2])+self.loss_e(scores_ob_side, all_triples[:, 2])+self.loss_e(scores_ob_llm, all_triples[:, 2])
+            #loss_ent += self.loss_e(scores_ob, all_triples[:, 2])+self.loss_e(scores_ob_side, all_triples[:, 2])+self.loss_e(scores_ob_llm, all_triples[:, 2])
+            loss_ent += self.loss_e(scores_ob_llm, all_triples[:, 2])
      
         if self.relation_prediction:
             score_rel = self.rdecoder.forward(pre_emb, r_emb, all_triples, mode="train").view(-1, 2 * self.num_rels)
