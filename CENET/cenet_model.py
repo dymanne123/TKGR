@@ -85,6 +85,10 @@ class CENET(nn.Module):
         self.weights_init(self.linear_pred_layer_s2)
         self.weights_init(self.linear_pred_layer_o2)
 
+        self.gate_weight = nn.Parameter(torch.Tensor(2 * args.embedding_dim, 1))    
+        nn.init.xavier_uniform_(self.gate_weight, gain=nn.init.calculate_gain('relu'))
+        self.gate_bias = nn.Parameter(torch.Tensor(1))
+        nn.init.zeros_(self.gate_bias)
         """
         pe = torch.zeros(400, 3 * args.embedding_dim)
         position = torch.arange(0, 400, dtype=torch.float).unsqueeze(1)
@@ -291,7 +295,13 @@ class CENET(nn.Module):
             self.dropout(torch.cat((self.entity_embeds[actor1], rel_embeds[r]), dim=1))))
         preds2 = F.softmax(preds_raw2.mm(self.entity_embeds.transpose(0, 1)) + non_history_tag, dim=1)
         #preds2 = F.softmax(preds_raw2.mm(self.entity_embeds.transpose(0, 1))* non_history_tag, dim=1)
-
+        e1_embedded_all = F.tanh(self.entity_embeds)
+        e1_embedded = e1_embedded_all[actor1]
+        rel_embedded = rel_embeds[r]
+        stacked_inputs = torch.cat((e1_embedded, rel_embedded), dim=1)
+        #print(stacked_inputs.shape)
+        #print(self.decoder_gate_weight.shape)
+        weight = F.sigmoid(torch.mm(stacked_inputs, self.gate_weight) + self.gate_bias)
         # cro_entr_loss = self.criterion_link(preds1 + preds2, actor2)
         weight=torch.sigmoid(self.weight)
         nce = torch.sum(torch.gather(torch.log(weight*preds1 + (1-weight)*preds2), 1, actor2.view(-1, 1)))
