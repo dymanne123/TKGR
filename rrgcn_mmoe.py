@@ -288,7 +288,7 @@ class RecurrentRGCN(nn.Module):
             return all_triples, score, score_rel
 
 
-    def get_loss(self, glist, triples, static_graph, entity_history_vocabulary, rel_history_vocabulary, use_cuda):
+    def get_loss(self, glist, triples, static_graph, entity_history_vocabulary, rel_history_vocabulary, mask,use_cuda):
         self.use_cuda = use_cuda
         loss_ent = torch.zeros(1).cuda().to(self.gpu) if use_cuda else torch.zeros(1)
         loss_rel = torch.zeros(1).cuda().to(self.gpu) if use_cuda else torch.zeros(1)
@@ -298,6 +298,9 @@ class RecurrentRGCN(nn.Module):
         inverse_triples[:, 1] = inverse_triples[:, 1] + self.num_rels
         all_triples = torch.cat([triples, inverse_triples])
         all_triples = all_triples.to(self.gpu)
+        inverse_mask=mask.clone()
+        all_masks=torch.cat([mask,inverse_mask],dim=0)
+        all_masks=all_masks.to(self.gpu)
 
         evolve_embs, static_emb, r_emb, _, _ = self.forward(glist, static_graph, use_cuda)
         pre_emb = F.normalize(evolve_embs[-1]) if self.layer_norm else evolve_embs[-1]
@@ -324,8 +327,11 @@ class RecurrentRGCN(nn.Module):
             score_nhis=score_weight_nhis*score+(1-score_weight_nhis)*score_llm
             score=score_weight_all*score_his+(1-score_weight_all)*score_nhis
             #score = torch.log(score)
+            #score_side=mask*score_his+(1-mask)*score_nhis
+            scores_side=torch.where(all_masks.unsqueeze(1) == 1, score_his, score_nhis)
             scores_en = torch.log(score)
-            loss_ent += F.nll_loss(scores_en, all_triples[:, 2])
+            scores_side = torch.log(scores_side)
+            loss_ent += F.nll_loss(scores_en, all_triples[:, 2])+F.nll_loss(scores_side, all_triples[:, 2])
      
         if self.relation_prediction:
             score_rel_r = self.rel_raw_mode(pre_emb, r_emb, time_embs, all_triples)
@@ -413,7 +419,6 @@ class RecurrentRGCN(nn.Module):
         score_h = score_global
         score_h = F.softmax(score_h, dim=1)
         return score_h
-
 
 
 
