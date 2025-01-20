@@ -8,7 +8,7 @@ import numpy as np
 # from rgcn.layers import RGCNBlockLayer as RGCNLayer
 from rgcn.layers import UnionRGCNLayer, RGCNBlockLayer
 from src.model import BaseRGCN
-from src.decoder import *
+from src.decoder_emb import *
 
 
 class RGCNCell(BaseRGCN):
@@ -283,6 +283,8 @@ class RecurrentRGCN(nn.Module):
             score_his=score_weight*score+(1-score_weight)*score_llm
             score_nhis=score_weight_nhis*score+(1-score_weight_nhis)*score_llm
             score=score_weight_all*score_his+(1-score_weight_all)*score_nhis
+            score = torch.mm(score, e1_embedded_all.transpose(1, 0)).view(-1, self.num_ents)
+            score = F.softmax(score, dim=1)
             score = torch.log(score)
 
             return all_triples, score, score_rel
@@ -326,9 +328,13 @@ class RecurrentRGCN(nn.Module):
             score_his=score_weight*score+(1-score_weight)*score_llm
             score_nhis=score_weight_nhis*score+(1-score_weight_nhis)*score_llm
             score=score_weight_all*score_his+(1-score_weight_all)*score_nhis
+            score = torch.mm(score, e1_embedded_all.transpose(1, 0)).view(-1, self.num_ents)
             #score = torch.log(score)
             #score_side=mask*score_his+(1-mask)*score_nhis
             scores_side=torch.where(all_masks.unsqueeze(1) == 1, score_his, score_nhis)
+            scores_side = torch.mm(scores_side, e1_embedded_all.transpose(1, 0)).view(-1, self.num_ents)
+            score = F.softmax(score, dim=1)
+            scores_side = F.softmax(scores_side, dim=1)
             scores_en = torch.log(score)
             scores_side = torch.log(scores_side)
             loss_ent += F.nll_loss(scores_en, all_triples[:, 2])+F.nll_loss(scores_side, all_triples[:, 2])
@@ -375,12 +381,12 @@ class RecurrentRGCN(nn.Module):
         return t1, t2
 
     def raw_mode(self, pre_emb, r_emb, time_embs, all_triples):
-        scores_ob = self.decoder_ob1.forward(pre_emb, r_emb, time_embs, all_triples).view(-1, self.num_ents)
-        score = F.softmax(scores_ob, dim=1)
+        score = self.decoder_ob1.forward(pre_emb, r_emb, time_embs, all_triples)
+        #score = F.softmax(scores_ob, dim=1)
         return score
     def raw_mode_llm(self, pre_emb, r_emb, time_embs, all_triples):
-        scores_ob = self.decoder_ob1_llm.forward(pre_emb, r_emb, time_embs, all_triples).view(-1, self.num_ents)
-        score = F.softmax(scores_ob, dim=1)
+        score = self.decoder_ob1_llm.forward(pre_emb, r_emb, time_embs, all_triples)
+        #score = F.softmax(scores_ob, dim=1)
         return score
 
     def history_mode(self, pre_emb, r_emb, time_embs, all_triples, history_vocabulary):
@@ -391,7 +397,7 @@ class RecurrentRGCN(nn.Module):
             global_index = torch.Tensor(np.array(history_vocabulary.cpu(), dtype=float))
         score_global = self.decoder_ob2.forward(pre_emb, r_emb, time_embs, all_triples, partial_embeding = global_index)
         score_h = score_global
-        score_h = F.softmax(score_h, dim=1)
+        #score_h = F.softmax(score_h, dim=1)
         return score_h
     def history_mode_llm(self, pre_emb, r_emb, time_embs, all_triples, history_vocabulary):
         if self.use_cuda:
@@ -401,7 +407,7 @@ class RecurrentRGCN(nn.Module):
             global_index = torch.Tensor(np.array(history_vocabulary.cpu(), dtype=float))
         score_global = self.decoder_ob2_llm.forward(pre_emb, r_emb, time_embs, all_triples, partial_embeding = global_index)
         score_h = score_global
-        score_h = F.softmax(score_h, dim=1)
+        #score_h = F.softmax(score_h, dim=1)
         return score_h
 
     def rel_raw_mode(self, pre_emb, r_emb, time_embs, all_triples):
