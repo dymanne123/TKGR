@@ -399,6 +399,8 @@ class RecurrentRGCN(nn.Module):
             #print(torch.var(score_weight_all[mask==0]))
             #print(torch.cat((score_weight_all,score_weight,score_weight_nhis,mask.unsqueeze(1)),dim=1))
             if print_score:
+                torch.save(embedding, '../models/entity_emb_ft.pth')
+                torch.save(r_emb, '../models/relation_emb_ft.pth')
                 print(score_weight)
                 print(score_weight_nhis)
                 print(score_weight_all)
