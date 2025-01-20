@@ -150,9 +150,10 @@ def run_experiment(args, history_len=None, n_layers=None, dropout=None, n_bases=
     # load graph data
     print("loading graph data")
     data = utils.load_data(args.dataset)   # 得到data类
-    train_list, train_times = utils.split_by_time(data.train)   # 划分为snapshots，逐时间步的数据集
-    valid_list, valid_times = utils.split_by_time(data.valid)
-    test_list, test_times = utils.split_by_time(data.test)
+    data_mask_train,data_mask_valid,data_mask_test=utils.get_mask(data)
+    train_list, train_times ,mask_train= utils.split_by_time_moe(data.train,data_mask_train)   # 划分为snapshots，逐时间步的数据集
+    valid_list, valid_times,mask_valid = utils.split_by_time_moe(data.valid,data_mask_valid)
+    test_list, test_times,_mask_test = utils.split_by_time_moe(data.test,data_mask_test)
 
     num_nodes = data.num_nodes
     num_rels = data.num_rels
@@ -363,19 +364,19 @@ def run_experiment(args, history_len=None, n_layers=None, dropout=None, n_bases=
                     else:
                         best_mrr = mrr_raw_r
                         torch.save({'state_dict': model.state_dict(), 'epoch': epoch}, model_state_file)
-        mrr_raw, mrr_filter, mrr_raw_r, mrr_filter_r, hit_result_raw, hit_result_filter, hit_result_raw_r, hit_result_filter_r = test(model,
-                                                            train_list+valid_list,
-                                                            test_list, 
-                                                            num_rels, 
-                                                            num_nodes, 
-                                                            use_cuda, 
-                                                            all_ans_list_test, 
-                                                            all_ans_list_r_test, 
-                                                            model_state_file, 
-                                                            static_graph,
-                                                            test_times,
-                                                            history_test_time_nogt,
-                                                            mode="test")
+            mrr_raw, mrr_filter, mrr_raw_r, mrr_filter_r, hit_result_raw, hit_result_filter, hit_result_raw_r, hit_result_filter_r = test(model,
+                                                                train_list+valid_list,
+                                                                test_list, 
+                                                                num_rels, 
+                                                                num_nodes, 
+                                                                use_cuda, 
+                                                                all_ans_list_test, 
+                                                                all_ans_list_r_test, 
+                                                                model_state_file, 
+                                                                static_graph,
+                                                                test_times,
+                                                                history_test_time_nogt,
+                                                                mode="test")
     return mrr_raw, mrr_filter, mrr_raw_r, mrr_filter_r, hit_result_raw, hit_result_filter, hit_result_raw_r, hit_result_filter_r
 
 
