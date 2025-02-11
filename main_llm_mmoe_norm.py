@@ -91,13 +91,15 @@ def test(model, history_list, test_list,mask_list,t, num_rels, num_nodes, use_cu
     score_wights=[]
     score_wights_his=[]
     score_wights_nhis=[]
+    llms_his=[]
+    llms_nhis=[]
     for time_idx, test_snap in enumerate(tqdm(test_list)):
         history_glist = [build_sub_graph(num_nodes, num_rels, g, use_cuda, args.gpu) for g in input_list]
         test_triples_input = torch.LongTensor(test_snap).cuda() if use_cuda else torch.LongTensor(test_snap)
         test_triples_input = test_triples_input.to(args.gpu)
         mask = torch.LongTensor(mask_list[time_idx]).cuda() if use_cuda else torch.LongTensor(mask_list[time_idx])
         mask = mask.to(args.gpu)
-        test_triples, final_score, final_r_score,score_wight,score_wight_his,score_wight_nhis = model.predict(history_glist, num_rels, static_graph, test_triples_input, mask,t,use_cuda)
+        test_triples, final_score, final_r_score,score_wight,score_wight_his,score_wight_nhis,llm_his,llm_nhis = model.predict(history_glist, num_rels, static_graph, test_triples_input, mask,t,use_cuda)
         if t==-1:
             test_triples, final_score, final_r_score,score_wight,score_wight_his,score_wight_nhis  = model.predict(history_glist, num_rels, static_graph, test_triples_input, mask,t,use_cuda,print_score=True)
         #print(final_r_score.shape)
@@ -123,6 +125,8 @@ def test(model, history_list, test_list,mask_list,t, num_rels, num_nodes, use_cu
         score_wights.append(score_wight)
         score_wights_his.append(score_wight_his)
         score_wights_nhis.append(score_wight_nhis)
+        llms_his.append(llm_his)
+        llms_nhis.append(llm_nhis)
 
         # reconstruct history graph list
         if args.multi_step:
@@ -144,6 +148,10 @@ def test(model, history_list, test_list,mask_list,t, num_rels, num_nodes, use_cu
     print("his variance",torch.var(torch.cat(score_wights_his)))
     print("nhis average",torch.mean(torch.cat(score_wights_nhis)))
     print("nhis variance",torch.var(torch.cat(score_wights_nhis)))
+    print("llm_his average",torch.mean(torch.cat(llms_his)))
+    print("llm_his variance",torch.var(torch.cat(llms_his)))
+    print("llm_nhis average",torch.mean(torch.cat(llms_nhis)))
+    print("llm_nhis variance",torch.var(torch.cat(llms_nhis)))
     mrr_raw = utils.stat_ranks(ranks_raw, "raw_ent")
     mrr_filter = utils.stat_ranks(ranks_filter, "filter_ent")
     mrr_raw_r = utils.stat_ranks(ranks_raw_r, "raw_rel")
@@ -228,7 +236,8 @@ def run_experiment(args, n_hidden=None, n_layers=None, dropout=None, n_bases=Non
                         relation_prediction=args.relation_prediction,
                         use_cuda=use_cuda,
                         gpu = args.gpu,
-                        analysis=args.run_analysis)
+                        analysis=args.run_analysis,
+                        weight_loss=args.weight_loss)
 
     if use_cuda:
         torch.cuda.set_device(args.gpu)
@@ -276,8 +285,8 @@ def run_experiment(args, n_hidden=None, n_layers=None, dropout=None, n_bases=Non
         #del checkpoint['rdecoder.weight']
         #del checkpoint['rdecoder.bias']
         #filtered_state_dict = {k: v for k, v in checkpoint['state_dict'].items() if 'decoder' not in k and k not in['emb_rel','dynamic_emb','rgcn.rel_emb']}
-        filtered_state_dict = {k: v for k, v in checkpoint['state_dict'].items() if 'decoder' not in k or "entity_decoder" in k or "relation_decoder" in k }
-        #filtered_state_dict = {k: v for k, v in checkpoint['state_dict'].items() if 'decoder' not in k}
+        #filtered_state_dict = {k: v for k, v in checkpoint['state_dict'].items() if 'decoder' not in k or "entity_decoder" in k or "relation_decoder" in k }
+        filtered_state_dict = {k: v for k, v in checkpoint['state_dict'].items() if 'decoder' not in k}
         model.load_state_dict(filtered_state_dict, strict=False)
         for name, param in model.named_parameters():
             #if 'decoder' not in name or "entity_decoder" in name or "relation_decoder" in name:  # 不冻结decoder的参数
@@ -469,7 +478,7 @@ if __name__ == '__main__':
                         help="do relation prediction")
 
     # configuration for stat training
-    parser.add_argument("--n-epochs", type=int, default=200,
+    parser.add_argument("--n-epochs", type=int, default=20,
                         help="number of minimum training epochs on each time step")
     parser.add_argument("--lr", type=float, default=0.001,
                         help="learning rate")
@@ -505,6 +514,8 @@ if __name__ == '__main__':
                         help="stat to use")
     parser.add_argument("--num-k", type=int, default=500,
                         help="number of triples generated")
+    parser.add_argument("--weight_loss", type=float, default=1,
+                        help="value of omega")
 
 
     args = parser.parse_args()
