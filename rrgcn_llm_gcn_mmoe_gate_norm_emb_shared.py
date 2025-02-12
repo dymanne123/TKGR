@@ -350,9 +350,12 @@ class RecurrentRGCN(nn.Module):
             embedding = F.normalize(llm_entity_emb)
             tensor_t = torch.full((llm_relation_emb.size(0), 1), t).to(self.gpu)
             r_emb = F.normalize(llm_relation_emb)
-            e1_embedded_all = F.tanh(embedding)
+            e1_embedded_all = F.tanh(embedding1)
+            #e1_embedded_all = F.tanh(torch.cat((embedding1, embedding), dim=1))
             e1_embedded = e1_embedded_all[all_triples[:, 0]]
-            rel_embedded = r_emb[all_triples[:, 1]]
+            #r_emb_all=F.tanh(torch.cat((r_emb1, r_emb), dim=1))
+            r_emb_all=F.tanh(r_emb1)
+            rel_embedded = r_emb_all[all_triples[:, 1]]
             stacked_inputs = torch.cat((e1_embedded, rel_embedded), dim=1)
             score_weight = F.sigmoid(torch.mm(stacked_inputs, self.decoder_gate_weight) + self.decoder_gate_bias)
 
@@ -366,7 +369,7 @@ class RecurrentRGCN(nn.Module):
             e1_embedded_nhis = e1_embedded_all[all_triples[:, 0]]
             rel_embedded_nhis = r_emb_nhis[all_triples[:, 1]]
             stacked_inputs_nhis = torch.cat((e1_embedded_nhis, rel_embedded_nhis), dim=1)
-            score_weight_nhis = F.sigmoid(torch.mm(stacked_inputs_nhis, self.decoder_gate_weight_nhis) + self.decoder_gate_bias_nhis)
+            score_weight_nhis = F.sigmoid(torch.mm(stacked_inputs, self.decoder_gate_weight_nhis) + self.decoder_gate_bias_nhis)
 
             score_weight_all = F.sigmoid(torch.mm(stacked_inputs, self.decoder_gate_weight_all) + self.decoder_gate_bias_all)
             #embedding=torch.add(embedding, llm_entity_emb)
@@ -452,9 +455,12 @@ class RecurrentRGCN(nn.Module):
         #r_emb=llm_relation_emb
         tensor_t = torch.full((llm_relation_emb.size(0), 1), t).to(self.gpu)
         r_emb = F.normalize(llm_relation_emb)
-        e1_embedded_all = F.tanh(pre_emb)
+        e1_embedded_all = F.tanh(pre_emb1)
+        #e1_embedded_all = F.tanh(torch.cat((pre_emb1, pre_emb), dim=1))
         e1_embedded = e1_embedded_all[all_triples[:, 0]]
-        rel_embedded = r_emb[all_triples[:, 1]]
+        #r_emb_all=F.tanh(torch.cat((r_emb1, r_emb), dim=1))
+        r_emb_all=F.tanh(r_emb1)
+        rel_embedded = r_emb_all[all_triples[:, 1]]
         stacked_inputs = torch.cat((e1_embedded, rel_embedded), dim=1)
         #print(stacked_inputs.shape)
         #print(self.decoder_gate_weight.shape)
@@ -472,7 +478,7 @@ class RecurrentRGCN(nn.Module):
         stacked_inputs_nhis = torch.cat((e1_embedded, rel_embedded), dim=1)
         #print(stacked_inputs.shape)
         #print(self.decoder_gate_weight.shape)
-        score_weight_nhis = F.sigmoid(torch.mm(stacked_inputs_nhis, self.decoder_gate_weight_nhis) + self.decoder_gate_bias_nhis)
+        score_weight_nhis = F.sigmoid(torch.mm(stacked_inputs, self.decoder_gate_weight_nhis) + self.decoder_gate_bias_nhis)
         score_weight_all = F.sigmoid(torch.mm(stacked_inputs, self.decoder_gate_weight_all) + self.decoder_gate_bias_all)
         if self.entity_prediction:
             scores_ob_his_emb = (score_weight*self.decoder_ob.forward(pre_emb, r_emb, all_triples))+((1-score_weight)*self.decoder_ob1.forward(pre_emb1, r_emb1, all_triples))
