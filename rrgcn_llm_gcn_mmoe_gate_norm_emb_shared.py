@@ -183,8 +183,40 @@ class RecurrentRGCN(nn.Module):
         self.time_gate_weight1 = nn.Parameter(torch.Tensor(h_dim, h_dim))    
         nn.init.xavier_uniform_(self.time_gate_weight1, gain=nn.init.calculate_gain('relu'))
         self.time_gate_bias1 = nn.Parameter(torch.Tensor(h_dim))
-        nn.init.zeros_(self.time_gate_bias1)                                                                  
+        nn.init.zeros_(self.time_gate_bias1)    
+        num_his_experts = 3
+        num_nhis_experts = 1
+        total_experts = num_his_experts + num_nhis_experts  
+        self.num_his_experts=num_his_experts
+        self.num_nhis_experts=num_nhis_experts
+        self.total_experts=total_experts
+        self.decoder_gate_weights = nn.ParameterList([
+            nn.Parameter(torch.Tensor(2*100, 1)) for _ in range(num_his_experts)
+        ])
+        self.decoder_gate_biases = nn.ParameterList([
+            nn.Parameter(torch.Tensor(1)) for _ in range(num_his_experts)
+        ])  
+        self.decoder_gate_weights_nhis = nn.ParameterList([
+            nn.Parameter(torch.Tensor(2*100, 1)) for _ in range(num_nhis_experts)
+        ])
+        self.decoder_gate_biases_nhis = nn.ParameterList([
+            nn.Parameter(torch.Tensor(1)) for _ in range(num_nhis_experts)
+        ]) 
+        self.decoder_gate_weight_all = nn.Parameter(torch.Tensor(2*100, total_experts))    
+        self.decoder_gate_bias_all = nn.Parameter(torch.Tensor(total_experts)) 
+        for weight in self.decoder_gate_weights:
+            nn.init.xavier_uniform_(weight, gain=nn.init.calculate_gain('relu'))
+        for bias in self.decoder_gate_biases:
+            nn.init.zeros_(bias)
 
+        for weight in self.decoder_gate_weights_nhis:
+            nn.init.xavier_uniform_(weight, gain=nn.init.calculate_gain('relu'))
+        for bias in self.decoder_gate_biases_nhis:
+            nn.init.zeros_(bias)
+
+        nn.init.xavier_uniform_(self.decoder_gate_weight_all, gain=nn.init.calculate_gain('relu'))
+        nn.init.zeros_(self.decoder_gate_bias_all)                                                        
+        
         self.decoder_gate_weight = nn.Parameter(torch.Tensor(2*100, 1))    
         nn.init.xavier_uniform_(self.decoder_gate_weight, gain=nn.init.calculate_gain('relu'))
         self.decoder_gate_bias = nn.Parameter(torch.Tensor(1))
@@ -194,12 +226,12 @@ class RecurrentRGCN(nn.Module):
         nn.init.xavier_uniform_(self.decoder_gate_weight_nhis, gain=nn.init.calculate_gain('relu'))
         self.decoder_gate_bias_nhis = nn.Parameter(torch.Tensor(1))
         nn.init.zeros_(self.decoder_gate_bias_nhis)
-
+        """
         self.decoder_gate_weight_all = nn.Parameter(torch.Tensor(2*100, 1))    
         nn.init.xavier_uniform_(self.decoder_gate_weight_all, gain=nn.init.calculate_gain('relu'))
         self.decoder_gate_bias_all = nn.Parameter(torch.Tensor(1))
         nn.init.zeros_(self.decoder_gate_bias_all)
-
+        """
         # GRU cell for relation evolving
         self.relation_cell_1 = nn.GRUCell(self.h_dim*2, self.h_dim)
         self.relation_cell_11= nn.GRUCell(self.h_dim*2, self.h_dim)
@@ -382,11 +414,40 @@ class RecurrentRGCN(nn.Module):
             score_his_emb= score_weight*self.decoder_ob.forward(embedding, r_emb, all_triples, mode="test")+(1-score_weight)*self.decoder_ob1.forward(embedding1, r_emb1, all_triples, mode="test")
             score_nhis_emb = score_weight_nhis*self.decoder_ob_nhis.forward(embedding, r_emb, all_triples, mode="test")+(1-score_weight_nhis)*self.decoder_ob1_nhis.forward(embedding1, r_emb1, all_triples, mode="test")
             
-            score_emb=(score_weight_all)*score_his_emb+(1-score_weight_all)*score_nhis_emb
+            #score_emb=(score_weight_all)*score_his_emb+(1-score_weight_all)*score_nhis_emb
             candidate_emb=F.tanh(embedding1)
             candidate_emb_nhis=F.tanh(embedding1_nhis)
             #score=(torch.mm(score_emb, candidate_emb.transpose(1, 0))+torch.mm(score_emb, candidate_emb_nhis.transpose(1, 0)))/2
-            score=torch.mm(score_emb, candidate_emb.transpose(1, 0))
+            #score=torch.mm(score_emb, candidate_emb.transpose(1, 0))
+            # 计算每个历史专家的得分
+            score_his_embs = []
+            for i in range(self.num_his_experts):
+                weight_his = F.sigmoid(torch.mm(stacked_inputs, self.decoder_gate_weights[i]) + self.decoder_gate_biases[i])  # [batch_size, 1]
+                # 融合两个feature的输出
+                score_his = weight_his * self.decoder_ob.forward(embedding, r_emb, all_triples, mode="test") + \
+                            (1-weight_his) * self.decoder_ob1.forward(embedding1, r_emb1, all_triples, mode="test")
+                score_his_embs.append(score_his)
+
+            # 计算每个非历史专家的得分
+            score_nhis_embs = []
+            for i in range(self.num_nhis_experts):
+                weight_nhis = F.sigmoid(torch.mm(stacked_inputs, self.decoder_gate_weights_nhis[i]) + self.decoder_gate_biases_nhis[i])  # [batch_size, 1]
+                # 融合两个feature的输出
+                score_nhis = weight_nhis * self.decoder_ob.forward(embedding, r_emb, all_triples, mode="test") + \
+                            (1-weight_nhis) * self.decoder_ob1.forward(embedding1, r_emb1, all_triples, mode="test")
+                score_nhis_embs.append(score_nhis)
+
+            # 将所有专家的输出拼接
+            all_expert_outputs = score_his_embs + score_nhis_embs  # 长度为6的list
+
+            # 使用score_weight_all作为最终的融合权重
+            score_weight_all = F.softmax(torch.mm(stacked_inputs, self.decoder_gate_weight_all) + self.decoder_gate_bias_all)  # [batch_size, 6]
+
+            # 最终融合
+            final_output = 0
+            for i in range(self.total_experts):
+                final_output += score_weight_all[:, i:i+1] * all_expert_outputs[i]
+            score=torch.mm(final_output, candidate_emb.transpose(1, 0))
             #print(score_weight_all)
             score_rel = self.rdecoder.forward(embedding, r_emb, all_triples, mode="test")
             #print(mask)
@@ -483,24 +544,63 @@ class RecurrentRGCN(nn.Module):
         if self.entity_prediction:
             scores_ob_his_emb = (score_weight*self.decoder_ob.forward(pre_emb, r_emb, all_triples))+((1-score_weight)*self.decoder_ob1.forward(pre_emb1, r_emb1, all_triples))
            
-            scores_ob_nhis_emb=(score_weight_nhis*self.decoder_ob_nhis.forward(pre_emb, r_emb, all_triples))+(1-score_weight_nhis)*self.decoder_ob1_nhis.forward(pre_emb1, r_emb1, all_triples)
+            scores_ob_nhis_emb=(score_weight_nhis*self.decoder_ob.forward(pre_emb, r_emb, all_triples))+(1-score_weight_nhis)*self.decoder_ob1.forward(pre_emb1, r_emb1, all_triples)
            #print(scores_ob_his.shape)
             #scores_ob=torch.where(all_masks.unsqueeze(1) == 1, scores_ob_his, scores_ob_nhis)
             #scores_ob=mask * scores_ob_his + (1 - mask) * scores_ob_nhis
             #print('okk')
-            score_emb=(score_weight_all)*scores_ob_his_emb+(1-score_weight_all)*scores_ob_nhis_emb
+            #score_emb=(score_weight_all)*scores_ob_his_emb+(1-score_weight_all)*scores_ob_nhis_emb
             score_emb_graph=self.decoder_ob1.forward(pre_emb1, r_emb1, all_triples)
             score_emb_llm=self.decoder_ob.forward(pre_emb, r_emb, all_triples)
             candidate_emb=F.tanh(pre_emb1)
             candidate_emb_llm=F.tanh(pre_emb)
             candidate_emb_nhis=F.tanh(pre_emb1_nhis)
             #scores_ob=((torch.mm(score_emb, candidate_emb.transpose(1, 0))+torch.mm(score_emb, candidate_emb_nhis.transpose(1, 0)))/2).view(-1, self.num_ents)
-            scores_ob=torch.mm(score_emb, candidate_emb.transpose(1, 0)).view(-1, self.num_ents)
+            #scores_ob=torch.mm(score_emb, candidate_emb.transpose(1, 0)).view(-1, self.num_ents)
             scores_ob_graph=torch.mm(score_emb_graph,candidate_emb.transpose(1, 0)).view(-1, self.num_ents)
             scores_ob_llm=torch.mm(score_emb_llm,candidate_emb_llm.transpose(1, 0)).view(-1, self.num_ents)
             scores_ob_his=torch.mm(scores_ob_his_emb, candidate_emb.transpose(1, 0)).view(-1, self.num_ents)
             #candidate_emb_nhis=F.tanh(pre_emb1_nhis)
             scores_ob_nhis=torch.mm(scores_ob_nhis_emb, candidate_emb_nhis.transpose(1, 0)).view(-1, self.num_ents)
+            scores_ob_side=torch.where(all_masks.unsqueeze(1) == 1, scores_ob_his, scores_ob_nhis)
+
+            score_his_embs = []
+            for i in range(self.num_his_experts):
+                weight_his = F.sigmoid(torch.mm(stacked_inputs, self.decoder_gate_weights[i]) + self.decoder_gate_biases[i])  # [batch_size, 1]
+                # 融合两个feature的输出
+                score_his = weight_his * self.decoder_ob.forward(pre_emb, r_emb, all_triples) + \
+                            (1-weight_his) * self.decoder_ob1.forward(pre_emb1, r_emb1, all_triples)
+                score_his_embs.append(score_his)
+
+            # 计算每个非历史专家的得分
+            score_nhis_embs = []
+            for i in range(self.num_nhis_experts):
+                weight_nhis = F.sigmoid(torch.mm(stacked_inputs, self.decoder_gate_weights_nhis[i]) + self.decoder_gate_biases_nhis[i])  # [batch_size, 1]
+                # 融合两个feature的输出
+                score_nhis = weight_nhis * self.decoder_ob.forward(pre_emb, r_emb, all_triples) + \
+                            (1-weight_nhis) * self.decoder_ob1.forward(pre_emb1, r_emb1, all_triples)
+                score_nhis_embs.append(score_nhis)
+
+            # 将所有专家的输出拼接
+            all_expert_outputs = score_his_embs + score_nhis_embs  # 长度为6的list
+
+            # 使用score_weight_all作为最终的融合权重
+            score_weight_all = F.softmax(torch.mm(stacked_inputs, self.decoder_gate_weight_all) + self.decoder_gate_bias_all)  # [batch_size, 6]
+
+            # 最终融合
+            final_output,final_output_his,final_output_nhis = 0,0,0
+            for i in range(self.total_experts):
+                final_output += score_weight_all[:, i:i+1] * all_expert_outputs[i]
+
+            for i in range(self.num_his_experts):
+                final_output_his += score_weight_all[:, i:i+1] * all_expert_outputs[i]
+            for i in range(self.num_nhis_experts):
+                final_output_nhis += score_weight_all[:, i+self.num_his_experts:i+self.num_his_experts+1] * all_expert_outputs[i+self.num_his_experts]
+
+            scores_ob=torch.mm(final_output, candidate_emb.transpose(1, 0)).view(-1, self.num_ents)
+            scores_ob_his=torch.mm(final_output_his, candidate_emb.transpose(1, 0)).view(-1, self.num_ents)
+            #candidate_emb_nhis=F.tanh(pre_emb1_nhis)
+            scores_ob_nhis=torch.mm(final_output_nhis, candidate_emb_nhis.transpose(1, 0)).view(-1, self.num_ents)
             scores_ob_side=torch.where(all_masks.unsqueeze(1) == 1, scores_ob_his, scores_ob_nhis)
             loss_ent += self.loss_e(scores_ob, all_triples[:, 2])+self.loss_weight*self.loss_e(scores_ob_side, all_triples[:, 2])+self.loss_e(scores_ob_llm, all_triples[:, 2])
      
